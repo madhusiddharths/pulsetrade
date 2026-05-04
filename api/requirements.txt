@@ -6,12 +6,15 @@ python-dotenv==1.0.1
 prometheus-fastapi-instrumentator==7.0.0
 
 # LLM + agent
-anthropic==0.40.0
 langgraph==0.2.60
 langchain==0.3.13
-langchain-anthropic==0.3.0
+langchain-google-genai==2.0.7
+langchain-groq==0.2.1
 langchain-mcp-adapters==0.0.3
 langsmith==0.2.3
+
+# MCP
+mcp==1.2.1
 
 # MCP (bumped to satisfy langchain-mcp-adapters)
 mcp==1.2.1
