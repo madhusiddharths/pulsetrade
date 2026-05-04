@@ -157,6 +157,15 @@ try:
         print(f"  ❌ NewsAPI: {j}")
 except Exception as e:
     print(f"  ❌ NewsAPI: {e}")
+
+# Silver table in Databricks
+try:
+       count_stocks = spark.table("workspace.pulsetrade.silver_stock_prices").count()
+       count_news = spark.table("workspace.pulsetrade.silver_market_news").count()
+       print(f"  ✅ Silver: {count_stocks} stock rows, {count_news} news rows")
+   except Exception as e:
+       print(f"  ❌ Silver: {e}")
+  
 PYEOF
 deactivate 2>/dev/null
 
