@@ -18,7 +18,7 @@ done
 echo ""
 echo "[2/8] .env variables"
 required_vars=(
-  GOOGLE_API_KEY GROQ_API_KEY NEWSAPI_KEY
+  GOOGLE_API_KEY GROQ_API_KEY NEWSAPI_KEY FINNHUB_API_KEY
   KAFKA_BOOTSTRAP_SERVERS KAFKA_API_KEY KAFKA_API_SECRET
   DATABRICKS_HOST DATABRICKS_TOKEN
   TAVILY_API_KEY LANGSMITH_API_KEY POSTGRES_URL
@@ -147,7 +147,7 @@ try:
     import requests
     r = requests.get(
         'https://newsapi.org/v2/top-headlines',
-        params={'country': 'us', 'category': 'business', 'apiKey': os.environ['NEWSAPI_KEY']},
+        params={'country': 'us', 'category': 'business', 'apiKey': os.environ['NEWSAPI_KEY FINNHUB_API_KEY']},
         timeout=10
     )
     j = r.json()
