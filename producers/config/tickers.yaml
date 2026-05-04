@@ -1,17 +1,55 @@
 # PulseTrade — tickers to track
-# Add or remove tickers without touching code.
-# 5 tickers × 30s polling = 14,400 calls/day to Yahoo Finance, well below their soft limits.
+# Single source of truth for both stock and news producers.
 
 tickers:
-  - NVDA   # NVIDIA — high volatility, AI sector
-  - AAPL   # Apple — large cap, stable
-  - MSFT   # Microsoft — large cap tech
-  - TSLA   # Tesla — high volatility, news-sensitive
-  - GOOGL  # Alphabet — large cap tech
+  - NVDA
+  - AAPL
+  - MSFT
+  - TSLA
+  - GOOGL
 
-# Polling interval in seconds.
-# Don't go below 15s — Yahoo Finance starts returning empties.
+# Keyword → ticker mapping for news article tagging.
+# Order matters: more specific keywords should come first
+# (e.g. "Alphabet" before "Google" so we match company names
+# correctly when both could apply).
+ticker_keywords:
+  NVDA:
+    - NVIDIA
+    - Nvidia
+    - Jensen Huang
+  AAPL:
+    - Apple
+    - iPhone
+    - Tim Cook
+    - AAPL
+  MSFT:
+    - Microsoft
+    - Satya Nadella
+    - Azure
+    - Copilot
+  TSLA:
+    - Tesla
+    - Elon Musk
+    - Cybertruck
+    - Model 3
+    - Model Y
+  GOOGL:
+    - Alphabet
+    - Google
+    - Sundar Pichai
+    - Gemini
+    - YouTube
+
+# Stock producer config (unchanged)
 poll_interval_seconds: 30
-
-# Kafka topic to produce to
 kafka_topic: stock-prices
+
+# News producer config (new)
+news_poll_interval_seconds: 1800   # 15 minutes = 96 polls/day, under 100/day limit
+news_kafka_topic: market-news
+
+# News categories from NewsAPI to fetch.
+# Free tier supports: business, technology, general
+news_categories:
+  - business
+  - technology
