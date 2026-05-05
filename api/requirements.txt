@@ -2,7 +2,11 @@
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 pydantic==2.10.4
+pydantic-settings==2.6.1
 python-dotenv==1.0.1
+httpx==0.27.2
+
+# Observability (Day 8-9, but harmless to install now)
 prometheus-fastapi-instrumentator==7.0.0
 
 # LLM + agent
@@ -13,16 +17,13 @@ langchain-groq==0.2.1
 langchain-mcp-adapters==0.0.3
 langsmith==0.2.3
 
-# MCP
+# MCP server SDK (Day 5)
 mcp==1.2.1
 
-# MCP (bumped to satisfy langchain-mcp-adapters)
-mcp==1.2.1
-
-# Search tool for the agent
+# Search tool for the agent (Day 5)
 tavily-python==0.5.0
 
-# Databricks Delta access
+# Databricks Delta access via SQL
 databricks-sql-connector==3.7.0
 
 # Postgres for storing investigation reports

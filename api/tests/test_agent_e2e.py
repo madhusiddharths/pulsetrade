@@ -1,0 +1,144 @@
+# api/tests/test_agent_e2e.py
+"""
+End-to-end smoke test for the investigation agent.
+
+Runs the full pipeline against real data:
+    1. fetch_context  — reads gold_5min_features
+    2. fetch_news     — reads silver_market_news
+    3. reason         — calls Gemini
+    4. write_report   — inserts into Postgres
+    5. (verify)       — re-reads the row to confirm
+
+Usage:
+    cd api && python tests/test_agent_e2e.py
+    cd api && python tests/test_agent_e2e.py --ticker NVDA
+    cd api && python tests/test_agent_e2e.py \
+        --ticker AAPL \
+        --lookback-minutes 1500 \
+        --window-start "2026-05-04T21:15:00"
+"""
+
+import argparse
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+# Make sure we can import from api/ regardless of cwd
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+print(f"[debug] running with: {sys.executable}", flush=True)
+
+from agent.graph import agent
+from agent.state import make_initial_state
+from data.postgres import get_investigation, init_schema
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--ticker",
+        default="AAPL",
+        help="ticker to investigate (default: AAPL)",
+    )
+    parser.add_argument(
+        "--anomaly-type",
+        default="price_spike",
+        help="anomaly type label stored on the investigation",
+    )
+    parser.add_argument(
+        "--lookback-minutes",
+        type=int,
+        default=30,
+        help="how far back fetch_context looks in gold_5min_features "
+             "(default 30; use 1500 for ~25h, 10080 for a week)",
+    )
+    parser.add_argument(
+        "--window-start",
+        default=None,
+        help="ISO timestamp for the anomaly window center (e.g. "
+             "'2026-05-04T21:15:00'); defaults to now. fetch_news searches "
+             "+/- 30 min around this.",
+    )
+    args = parser.parse_args()
+
+    # Resolve window_start: explicit ISO arg, or now()
+    if args.window_start:
+        ws = datetime.fromisoformat(args.window_start)
+        if ws.tzinfo is None:
+            ws = ws.replace(tzinfo=timezone.utc)
+    else:
+        ws = datetime.now(timezone.utc)
+
+    init_schema()  # idempotent — safe to call
+
+    initial = make_initial_state(
+        ticker=args.ticker,
+        anomaly_type=args.anomaly_type,
+        window_start=ws,
+        lookback_minutes=args.lookback_minutes,
+    )
+
+    print(f"\n=== INVOKING AGENT ===")
+    print(f"ticker={initial['ticker']} type={initial['anomaly_type']}")
+    print(f"window_start={initial['window_start']}")
+    print(f"lookback_minutes={initial['lookback_minutes']}\n")
+
+    final = agent.invoke(initial)
+
+    print("\n=== FINAL STATE ===")
+    print(f"  gold rows:       {len(final.get('gold_context', []))}")
+    print(f"  news rows:       {len(final.get('news_context', []))}")
+    print(f"  reasoning chars: {len(final.get('reasoning', ''))}")
+    print(f"  report_id:       {final.get('report_id')}")
+    print(f"  errors:          {final.get('errors', [])}")
+
+    rid = final.get("report_id")
+    if not rid:
+        print("\n❌ no report_id — investigation failed before reaching write_report")
+        sys.exit(1)
+
+    # Read it back from Postgres to confirm the write actually persisted
+    row = get_investigation(rid)
+    if not row:
+        print(f"\n❌ report_id {rid} not found in Postgres")
+        sys.exit(1)
+
+    print(f"\n=== POSTGRES ROW #{rid} ===")
+    print(f"  ticker:       {row['ticker']}")
+    print(f"  anomaly_type: {row['anomaly_type']}")
+    print(f"  created_at:   {row['created_at']}")
+    print(f"\n--- report_markdown (first 600 chars) ---")
+    print(row["report_markdown"][:600])
+
+    # ── Real validation ──────────────────────────────────────────────────
+    # The previous version of this test passed as long as ANY row landed in
+    # Postgres — even the "investigation failed" stub. That's misleading.
+    # Now we actually check the agent produced real analysis.
+    failed = False
+
+    if final.get("errors"):
+        print(f"\n❌ agent recorded errors:")
+        for e in final["errors"]:
+            print(f"   - {e}")
+        failed = True
+
+    if len(final.get("reasoning", "")) < 100:
+        print(
+            f"\n❌ reasoning is empty or too short "
+            f"({len(final.get('reasoning', ''))} chars) — Gemini likely failed"
+        )
+        failed = True
+
+    if final.get("report_markdown", "").startswith("# Investigation failed"):
+        print("\n❌ report_markdown is the failure stub, not real analysis")
+        failed = True
+
+    if failed:
+        print("\n❌ AGENT END-TO-END TEST FAILED")
+        sys.exit(1)
+
+    print("\n✅ AGENT END-TO-END TEST PASSED")
+
+
+if __name__ == "__main__":
+    main()
