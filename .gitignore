@@ -1,31 +1,57 @@
-# Python
+# secrets — NEVER commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.yaml
+
+# python
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.Python
 .venv/
 venv/
-.env
-*.egg-info/
+*/.venv/
+*/venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
 
-# IDE
+# IDE / OS
 .vscode/
 .idea/
 .DS_Store
+Thumbs.db
+*.swp
+*.swo
 
-# Logs
-logs/
+# notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# data / state
+postgres/data/
+postgres/pgdata/
+*.db
+*.sqlite
+*.sqlite3
+
+# logs
 *.log
+logs/
 
-# Airflow
-airflow.db
-airflow.cfg
-webserver_config.py
-standalone_admin_password.txt
+# docker
+docker-compose.override.yml
 
-# Data
-data/
-*.parquet
+# build artifacts
+dist/
+build/
+*.egg-info/
 
-# Secrets
-*.pem
-*.key
-service-account*.json
+# screenshots — keep manually-curated ones, ignore drafts
+docs/screenshots/_drafts/
