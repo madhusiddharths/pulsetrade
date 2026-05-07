@@ -3,14 +3,13 @@
 LangGraph state for the investigation agent.
 
 State flows through nodes accumulating data:
-    fetch_context fills `gold_context`
-    fetch_news    fills `news_context`
-    reason        fills `reasoning` and `report_markdown`
+    fetch_context fills `gold_context` (still hardcoded — free baseline)
+    investigate   runs a ReAct loop, accumulates `messages`, fills `reasoning`
     write_report  fills `report_id`
 """
 
 from datetime import datetime
-from typing import TypedDict
+from typing import Any, TypedDict
 
 
 class AgentState(TypedDict, total=False):
@@ -18,22 +17,21 @@ class AgentState(TypedDict, total=False):
     ticker: str
     anomaly_type: str
     window_start: datetime
-    lookback_minutes: int        # how far back fetch_context queries gold
+    lookback_minutes: int
 
-    # ── Filled by fetch_context ──────────────────────────────────────────────
+    # ── Filled by fetch_context (kept from Day 4 — free baseline) ────────────
     gold_context: list[dict]
 
-    # ── Filled by fetch_news ─────────────────────────────────────────────────
-    news_context: list[dict]
-
-    # ── Filled by reason ─────────────────────────────────────────────────────
-    reasoning: str               # raw LLM output
+    # ── Filled by investigate (ReAct loop) ───────────────────────────────────
+    messages: list[Any]          # LangChain message objects
+    iterations: int              # how many ReAct turns ran
+    reasoning: str               # final answer extracted from last AIMessage
     report_markdown: str         # cleaned/formatted brief saved to Postgres
 
     # ── Filled by write_report ───────────────────────────────────────────────
     report_id: int
 
-    # ── Diagnostics (any node can append) ────────────────────────────────────
+    # ── Diagnostics ──────────────────────────────────────────────────────────
     errors: list[str]
 
 
@@ -50,7 +48,8 @@ def make_initial_state(
         window_start=window_start,
         lookback_minutes=lookback_minutes,
         gold_context=[],
-        news_context=[],
+        messages=[],
+        iterations=0,
         reasoning="",
         report_markdown="",
         report_id=0,

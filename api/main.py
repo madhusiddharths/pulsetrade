@@ -9,6 +9,12 @@ Endpoints:
   GET  /investigations/{id}          — fetch a previously-saved report
 """
 
+# Load .env into os.environ BEFORE importing anything that might read env vars
+# (LangChain reads LANGSMITH_TRACING via os.getenv at import time)
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
 import asyncio
 import sys
 from contextlib import asynccontextmanager
@@ -80,15 +86,21 @@ class InvestigationRequest(BaseModel):
     Inbound trigger from the anomaly detector (or manual curl).
 
     `window_start` should be the ISO timestamp of the 5-min window where the
-    anomaly was detected. The agent searches news in window_start ± 30 min.
+    anomaly was detected. Defaults to current UTC time if not provided —
+    convenient for manual curls and "investigate now" UI buttons. The Day 6
+    anomaly detector always sets this explicitly.
     """
     ticker: str = Field(..., min_length=1, max_length=10, examples=["AAPL"])
     anomaly_type: str = Field(..., min_length=1, examples=["price_spike"])
-    window_start: datetime = Field(..., examples=["2026-05-04T21:15:00Z"])
+    window_start: Optional[datetime] = Field(
+        default=None,
+        examples=["2026-05-04T21:15:00Z"],
+        description="ISO timestamp of the anomaly window. Defaults to now (UTC).",
+    )
     lookback_minutes: int = Field(
         default=30,
         ge=5,
-        le=24 * 60 * 7,  # 1 week max
+        le=24 * 60 * 7,
         description="how far back fetch_context queries gold",
     )
 
@@ -99,7 +111,8 @@ class InvestigationResponse(BaseModel):
     anomaly_type: str
     window_start: datetime
     gold_rows: int
-    news_rows: int
+    iterations: int                 # NEW — replaces news_rows
+    tool_calls: int                 # NEW — how many tool calls happened
     report_markdown: str
     errors: list[str] = []
 
@@ -155,8 +168,8 @@ async def ready():
     ),
 )
 async def investigate(req: InvestigationRequest):
-    # Normalize window_start to UTC if naive
-    ws = req.window_start
+    # Default to now if caller didn't specify; normalize naive timestamps to UTC
+    ws = req.window_start or datetime.now(timezone.utc)
     if ws.tzinfo is None:
         ws = ws.replace(tzinfo=timezone.utc)
 
@@ -192,13 +205,21 @@ async def investigate(req: InvestigationRequest):
             },
         )
 
+    # Count tool calls from the LangChain message log
+    tool_calls = sum(
+        len(getattr(m, "tool_calls", None) or [])
+        for m in final.get("messages", [])
+        if type(m).__name__ == "AIMessage"
+    )
+
     return InvestigationResponse(
         investigation_id=rid,
         ticker=req.ticker,
         anomaly_type=req.anomaly_type,
         window_start=ws,
         gold_rows=len(final.get("gold_context", [])),
-        news_rows=len(final.get("news_context", [])),
+        iterations=final.get("iterations", 0),
+        tool_calls=tool_calls,
         report_markdown=final.get("report_markdown", ""),
         errors=final.get("errors", []),
     )

@@ -55,3 +55,9 @@ build/
 
 # screenshots — keep manually-curated ones, ignore drafts
 docs/screenshots/_drafts/
+
+# airflow
+airflow/logs/
+airflow/plugins/
+airflow/config/airflow.cfg
+airflow/.env

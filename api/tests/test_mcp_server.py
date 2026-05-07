@@ -1,72 +1,124 @@
-# api/tests/test_mcp_server.py
+# api/tests/test_agent_e2e.py
 """
-Standalone smoke test for the MCP server.
+End-to-end smoke test for the Day 5 ReAct agent.
 
-Spawns mcp_server.server as a subprocess, lists tools, calls get_recent_gold,
-and prints the result. Validates the MCP protocol layer before wiring to
-LangGraph.
+Runs the full pipeline and surfaces the agent's tool-calling behavior:
+    1. fetch_context  — baseline (hardcoded query)
+    2. investigate    — ReAct loop with MCP tools
+    3. write_report   — Postgres insert
 
 Usage:
-    cd api && python tests/test_mcp_server.py
+    cd api && python tests/test_agent_e2e.py
+    cd api && python tests/test_agent_e2e.py --ticker AAPL
+    cd api && python tests/test_agent_e2e.py \\
+        --ticker AAPL \\
+        --lookback-minutes 1500 \\
+        --window-start "2026-05-04T21:15:00"
 """
 
-import asyncio
+import argparse
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 print(f"[debug] running with: {sys.executable}", flush=True)
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from agent.graph import agent
+from agent.state import make_initial_state
+from data.postgres import get_investigation, init_schema
 
 
-async def main():
-    # Spawn the server as a subprocess of THIS python interpreter,
-    # so it inherits our venv's installed packages.
-    server_params = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "mcp_server.server"],
-        cwd=str(Path(__file__).resolve().parents[1]),  # api/
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ticker", default="AAPL")
+    parser.add_argument("--anomaly-type", default="price_spike")
+    parser.add_argument("--lookback-minutes", type=int, default=30)
+    parser.add_argument("--window-start", default=None)
+    args = parser.parse_args()
+
+    if args.window_start:
+        ws = datetime.fromisoformat(args.window_start)
+        if ws.tzinfo is None:
+            ws = ws.replace(tzinfo=timezone.utc)
+    else:
+        ws = datetime.now(timezone.utc)
+
+    init_schema()
+
+    initial = make_initial_state(
+        ticker=args.ticker,
+        anomaly_type=args.anomaly_type,
+        window_start=ws,
+        lookback_minutes=args.lookback_minutes,
     )
 
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            print("✓ MCP session initialized")
+    print(f"\n=== INVOKING AGENT ===")
+    print(f"ticker={initial['ticker']} type={initial['anomaly_type']}")
+    print(f"window_start={initial['window_start']}")
+    print(f"lookback_minutes={initial['lookback_minutes']}\n")
 
-            # 1. Tool discovery
-            tools_result = await session.list_tools()
-            tools = tools_result.tools
-            print(f"\n=== {len(tools)} tools advertised ===")
-            for t in tools:
-                print(f"  • {t.name}")
-                print(f"      {t.description[:80]}...")
+    final = agent.invoke(initial)
 
-            # 2. Call get_recent_gold
-            print(f"\n=== calling get_recent_gold(AAPL, 1500) ===")
-            result = await session.call_tool(
-                "get_recent_gold",
-                arguments={"ticker": "AAPL", "lookback_minutes": 1500},
-            )
-            text = result.content[0].text if result.content else "(empty)"
-            print(f"got {len(text)} chars of output")
-            print(f"first 400 chars:\n{text[:400]}")
+    print("\n=== FINAL STATE ===")
+    print(f"  gold rows:       {len(final.get('gold_context', []))}")
+    print(f"  iterations:      {final.get('iterations', 0)}")
+    print(f"  reasoning chars: {len(final.get('reasoning', ''))}")
+    print(f"  report_id:       {final.get('report_id')}")
+    print(f"  errors:          {final.get('errors', [])}")
 
-            # 3. Real Tavily search
-            print(f"\n=== calling tavily_web_search ===")
-            result = await session.call_tool(
-                "tavily_web_search",
-                arguments={
-                    "query": "AAPL Apple stock news this week",
-                    "max_results": 3,
-                },
-            )
-            text = result.content[0].text if result.content else "(empty)"
-            print(f"got {len(text)} chars of output")
-            print(f"first 600 chars:\n{text[:600]}")
+    # Surface what tools the agent actually called
+    print("\n=== AGENT TOOL CALLS ===")
+    tool_call_count = 0
+    for m in final.get("messages", []):
+        if type(m).__name__ == "AIMessage":
+            for tc in (getattr(m, "tool_calls", None) or []):
+                tool_call_count += 1
+                print(f"  → {tc['name']}({tc['args']})")
+    if tool_call_count == 0:
+        print("  (none — agent answered from baseline alone)")
+    print(f"\n  total tool calls: {tool_call_count}")
+
+    rid = final.get("report_id")
+    if not rid:
+        print("\n❌ no report_id — investigation failed before write")
+        sys.exit(1)
+
+    row = get_investigation(rid)
+    if not row:
+        print(f"\n❌ report_id {rid} not found in Postgres")
+        sys.exit(1)
+
+    print(f"\n=== POSTGRES ROW #{rid} ===")
+    print(f"  ticker:       {row['ticker']}")
+    print(f"  anomaly_type: {row['anomaly_type']}")
+    print(f"  created_at:   {row['created_at']}")
+    print(f"\n--- report_markdown (first 800 chars) ---")
+    print(row["report_markdown"][:800])
+
+    # Validation
+    failed = False
+    if final.get("errors"):
+        print(f"\n❌ agent recorded errors:")
+        for e in final["errors"]:
+            print(f"   - {e}")
+        failed = True
+
+    if len(final.get("reasoning", "")) < 100:
+        print(f"\n❌ reasoning too short ({len(final.get('reasoning', ''))} chars)")
+        failed = True
+
+    if final.get("report_markdown", "").startswith("# Investigation failed"):
+        print("\n❌ report_markdown is failure stub")
+        failed = True
+
+    if failed:
+        print("\n❌ AGENT END-TO-END TEST FAILED")
+        sys.exit(1)
+
+    print("\n✅ AGENT END-TO-END TEST PASSED")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

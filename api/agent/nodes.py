@@ -1,56 +1,132 @@
 # api/agent/nodes.py
 """
-Investigation agent nodes.
+Investigation agent nodes — Day 5 ReAct version.
 
-Each node:
-  - Reads input from `state`
-  - Does ONE thing (fetch data, call LLM, write DB)
-  - Returns the updated state
+Topology:
+    fetch_context  → investigate (ReAct loop) → write_report
 
-Errors are appended to state["errors"] but never raise — graph must complete.
+`fetch_context` is kept hardcoded — giving Gemini the last 30 min of gold
+"for free" saves the agent ~30s and several tool calls every run. The agent
+only needs MCP tools when it wants more than this baseline.
 """
 
-from datetime import timedelta, timezone
+import asyncio
+from datetime import timezone
+from typing import Optional
 
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from config import settings
 from data import databricks as dbx
 from data import postgres as pg
+from .mcp_client import mcp_session
 from .state import AgentState
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
+
+# Singletons — built once per process.
+_llm_with_tools = None
+_max_iterations = 8
 
 
-# Lazily-built singleton — first call to reason() constructs it,
-# subsequent calls reuse the same client (saves ~100ms per run on init).
-_llm: ChatGoogleGenerativeAI | None = None
-
-
-def _get_llm() -> ChatGoogleGenerativeAI:
-    """
-    Build (or return cached) Gemini client.
-
-    Passing `google_api_key=` explicitly is critical: without it,
-    google.auth picks up cached `gcloud` Application Default Credentials
-    and uses those scopes instead — which fail with 403 on Gemini.
-    """
-    global _llm
-    if _llm is None:
-        _llm = ChatGoogleGenerativeAI(
+async def _get_llm():
+    """Build (or return cached) Gemini client bound to MCP tools."""
+    global _llm_with_tools
+    if _llm_with_tools is None:
+        tools = await get_mcp_tools()
+        base_llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
             temperature=0.2,
             google_api_key=settings.google_api_key,
         )
-    return _llm
+        _llm_with_tools = base_llm.bind_tools(tools)
+        print(
+            f"[llm] bound {len(tools)} MCP tools to Gemini: "
+            f"{[t.name for t in tools]}",
+            flush=True,
+        )
+    return _llm_with_tools
+
+
+def _build_system_prompt(state: AgentState) -> str:
+    """The agent's role + guidance on when to use which tool."""
+    return f"""You are a financial market anomaly investigator.
+
+Your job: given an anomaly trigger, decide whether it represents a real,
+meaningful market event — and explain why with specific evidence.
+
+You have access to tools that query our internal financial data lake plus
+the live web. Use them deliberately:
+
+  • get_recent_gold       — pull more historical 5-minute windows. Use this
+                            if the baseline context isn't enough to judge the
+                            move (e.g. you need a longer comparison).
+  • get_news_for_window   — pull news in a specific time window. Use this
+                            when you suspect news drove the move.
+  • tavily_web_search     — search the live web. Use this for events that
+                            may not be in our internal news pipeline yet
+                            (earnings dates, exec changes, lawsuits, macro
+                            announcements).
+
+You do NOT need to call every tool. Stop when you have enough evidence to
+answer. Calling tools costs latency and money — be efficient.
+
+When you have enough evidence, write your final brief in markdown with
+these sections, and DO NOT call any more tools after that:
+
+  ## Summary
+    One sentence: is this a real anomaly or noise? Confidence level.
+
+  ## Evidence
+    Bullet points citing specific numbers from the data.
+
+  ## Likely Cause
+    Best hypothesis given the evidence. Cite sources by URL when relevant.
+
+  ## Recommended Action
+    One of: "monitor", "investigate further", "alert human analyst", "ignore"
+
+CONTEXT FOR THIS INVESTIGATION:
+  Ticker:        {state['ticker']}
+  Anomaly type:  {state['anomaly_type']}
+  Window start:  {state['window_start']}
+"""
+
+
+def _build_initial_user_message(state: AgentState) -> str:
+    """First user message — includes the baseline gold context for free."""
+    gold = state.get("gold_context", [])
+    if not gold:
+        gold_section = "(no baseline gold rows — agent must fetch via tools)"
+    else:
+        lines = []
+        for r in gold[:10]:
+            lines.append(
+                f"  {r['window_start']}: open={r['open_5min']}, close={r['close_5min']}, "
+                f"high={r['high_5min']}, low={r['low_5min']}, "
+                f"stddev={r.get('price_stddev')}, "
+                f"change_pct={r.get('mean_change_pct')}, "
+                f"sentiment={r.get('mean_news_sentiment')}, "
+                f"news_count={r.get('news_article_count')}"
+            )
+        gold_section = "\n".join(lines)
+
+    return f"""Investigate this anomaly.
+
+BASELINE GOLD CONTEXT (last 30 min, already fetched for you):
+{gold_section}
+
+Decide whether you need more data via tool calls, or whether this baseline
+is sufficient. Then produce your investigation brief.
+"""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Node 1: fetch_context — pull recent gold features for the ticker
+# Node 1: fetch_context — baseline (unchanged from Day 4)
 # ─────────────────────────────────────────────────────────────────────────────
 def fetch_context(state: AgentState) -> AgentState:
-    """
-    Pull gold_5min_features rows for this ticker into state.
-    Lookback window read from state["lookback_minutes"]; defaults to 30.
-    """
+    """Pull baseline gold rows for the ticker. Lookback configurable via state."""
     try:
         lookback = state.get("lookback_minutes", 30)
         rows = dbx.get_recent_gold(state["ticker"], lookback_minutes=lookback)
@@ -67,126 +143,182 @@ def fetch_context(state: AgentState) -> AgentState:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Node 2: fetch_news — pull news around the anomaly window
+# Node 2: investigate — the ReAct loop
 # ─────────────────────────────────────────────────────────────────────────────
-def fetch_news(state: AgentState) -> AgentState:
+async def _investigate_async(state: AgentState) -> AgentState:
     """
-    Pull silver_market_news rows for this ticker in a window centered on
-    `window_start` — 30 min before, 30 min after.
-    """
-    try:
-        ws = state["window_start"]
-        if ws.tzinfo is None:
-            ws = ws.replace(tzinfo=timezone.utc)
-        start = ws - timedelta(minutes=30)
-        end = ws + timedelta(minutes=30)
+    Async ReAct loop.
 
-        rows = dbx.get_news_for_window(state["ticker"], start, end, limit=20)
-        state["news_context"] = rows
+    Wraps the entire loop in `mcp_session()` so the MCP subprocess stays
+    alive while tools are being invoked. Exiting this context kills the
+    subprocess and invalidates the tool handles — must NOT call tools
+    after the `async with` block exits.
+    """
+    from .mcp_client import mcp_session
+
+    async with mcp_session() as (_session, tools):
+        tools_by_name = {t.name: t for t in tools}
+
+        # Build LLM bound to the now-loaded tools.
+        # Built fresh each investigation because tools' underlying session
+        # changes per investigation — can't cache across runs.
+        base_llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            temperature=0.2,
+            google_api_key=settings.google_api_key,
+        )
+        llm = base_llm.bind_tools(tools)
         print(
-            f"[fetch_news] {state['ticker']}: {len(rows)} news rows "
-            f"in [{start}, {end}]",
+            f"[llm] bound {len(tools)} MCP tools to Gemini: "
+            f"{[t.name for t in tools]}",
             flush=True,
         )
-    except Exception as e:
-        state.setdefault("errors", []).append(f"fetch_news: {e}")
-        state["news_context"] = []
-    return state
 
+        messages = [
+            SystemMessage(content=_build_system_prompt(state)),
+            HumanMessage(content=_build_initial_user_message(state)),
+        ]
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Node 3: reason — Gemini analyzes and writes the brief
-# ─────────────────────────────────────────────────────────────────────────────
-def _build_reasoning_prompt(state: AgentState) -> str:
-    """Assemble the prompt for Gemini from the gathered context."""
-    gold = state.get("gold_context", [])
-    news = state.get("news_context", [])
+        iteration = 0
+        final_text = ""
 
-    # Compact gold table → easy-to-scan text for the model
-    gold_lines = []
-    for r in gold[:10]:  # cap to keep prompt small
-        gold_lines.append(
-            f"  {r['window_start']}: open={r['open_5min']}, close={r['close_5min']}, "
-            f"high={r['high_5min']}, low={r['low_5min']}, "
-            f"stddev={r.get('price_stddev')}, "
-            f"change_pct={r.get('mean_change_pct')}, "
-            f"sentiment={r.get('mean_news_sentiment')}, "
-            f"news_count={r.get('news_article_count')}"
-        )
-    gold_section = "\n".join(gold_lines) if gold_lines else "  (no gold rows)"
+        while iteration < _max_iterations:
+            iteration += 1
+            print(f"[investigate] iteration {iteration}/{_max_iterations}", flush=True)
 
-    news_lines = []
-    for n in news[:10]:
-        score = n.get("sentiment_score")
-        score_str = f"{score:.2f}" if isinstance(score, (int, float)) else "n/a"
-        news_lines.append(
-            f"  [{n.get('sentiment_label')} / {score_str}] "
-            f"{n.get('title')} — {n.get('source_name')}"
-        )
-    news_section = "\n".join(news_lines) if news_lines else "  (no news in window)"
+            try:
+                response: AIMessage = await llm.ainvoke(messages)
+            except Exception as e:
+                state.setdefault("errors", []).append(f"investigate llm.ainvoke: {e}")
+                break
 
-    return f"""You are a financial analyst investigating a market anomaly.
+            messages.append(response)
+            tool_calls = getattr(response, "tool_calls", None) or []
 
-ANOMALY DETAILS
-  Ticker:        {state['ticker']}
-  Anomaly type:  {state['anomaly_type']}
-  Window start:  {state['window_start']}
+            if not tool_calls:
+                final_text = response.content if isinstance(response.content, str) else str(response.content)
+                print(
+                    f"[investigate] no more tool calls — final answer "
+                    f"({len(final_text)} chars)",
+                    flush=True,
+                )
+                break
 
-RECENT 5-MINUTE FEATURE WINDOWS (most recent first)
-{gold_section}
+            print(
+                f"[investigate] gemini wants to call: "
+                f"{[(tc['name'], list(tc['args'].keys())) for tc in tool_calls]}",
+                flush=True,
+            )
 
-NEWS IN ±30 MIN WINDOW
-{news_section}
+            for tc in tool_calls:
+                tool_name = tc["name"]
+                tool_args = tc["args"]
+                tool_call_id = tc["id"]
 
-YOUR TASK
-Write a concise investigation brief in markdown with these sections:
+                # Defensive: some providers serialize args as JSON string
+                if isinstance(tool_args, str):
+                    import json as _json
+                    try:
+                        tool_args = _json.loads(tool_args)
+                    except _json.JSONDecodeError:
+                        tool_args = {}
 
-  ## Summary
-    One sentence: is this a real anomaly or noise? Confidence level.
+                tool = tools_by_name.get(tool_name)
+                if tool is None:
+                    result_text = f"ERROR: unknown tool {tool_name}"
+                else:
+                    try:
+                        result_text = await tool.ainvoke(tool_args)
+                        if not isinstance(result_text, str):
+                            result_text = str(result_text)
+                    except Exception as e:
+                        result_text = f"ERROR: tool {tool_name} failed: {e}"
+                        state.setdefault("errors", []).append(
+                            f"investigate tool {tool_name}: {e}"
+                        )
 
-  ## Evidence
-    Bullet points citing specific numbers from the data above.
+                if not result_text or not result_text.strip():
+                    result_text = "(tool returned no results)"
 
-  ## Likely Cause
-    Best hypothesis given the evidence. If news supports it, name the article.
+                if len(result_text) > 8000:
+                    result_text = result_text[:8000] + "\n... [truncated]"
 
-  ## Recommended Action
-    One of: "monitor", "investigate further", "alert human analyst", "ignore"
+                messages.append(ToolMessage(content=result_text, tool_call_id=tool_call_id))
 
-Be specific. Cite numbers. If data is insufficient, say so explicitly — do not speculate.
-"""
+        if iteration >= _max_iterations and not final_text:
+            print(f"[investigate] hit iteration cap, requesting final summary", flush=True)
+            messages.append(HumanMessage(
+                content=(
+                    "You've used your tool-call budget. Stop calling tools and "
+                    "write your final investigation brief now using whatever "
+                    "evidence you've gathered."
+                )
+            ))
+            try:
+                response = await llm.ainvoke(messages)
+                final_text = response.content if isinstance(response.content, str) else str(response.content)
+            except Exception as e:
+                state.setdefault("errors", []).append(f"investigate forced-summary: {e}")
+                final_text = "# Investigation incomplete\n\nIteration cap reached without final answer."
 
+        state["messages"] = messages
+        state["iterations"] = iteration
+        state["reasoning"] = final_text
+        state["report_markdown"] = final_text or "# Investigation failed\n\nNo reasoning produced."
+        return state
 
-def reason(state: AgentState) -> AgentState:
-    """Build prompt → invoke Gemini → store reasoning + report_markdown."""
+def investigate(state: AgentState) -> AgentState:
+    """
+    Sync wrapper around the async ReAct loop.
+
+    LangGraph nodes can be sync or async. We expose this as sync because the
+    surrounding graph build is sync, and we run the loop with asyncio.run.
+    """
     try:
-        prompt = _build_reasoning_prompt(state)
-        llm = _get_llm()
-        resp = llm.invoke(prompt)
-        text = resp.content if hasattr(resp, "content") else str(resp)
-
-        state["reasoning"] = text
-        state["report_markdown"] = text  # for now, same as reasoning
-        print(f"[reason] generated {len(text)} chars of analysis", flush=True)
+        return asyncio.run(_investigate_async(state))
     except Exception as e:
-        state.setdefault("errors", []).append(f"reason: {e}")
+        state.setdefault("errors", []).append(f"investigate (top-level): {e}")
         state["reasoning"] = ""
         state["report_markdown"] = f"# Investigation failed\n\nError: {e}"
-    return state
+        return state
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Node 4: write_report — persist to Postgres
+# Node 3: write_report — persist (unchanged from Day 4 except thoughts shape)
 # ─────────────────────────────────────────────────────────────────────────────
 def write_report(state: AgentState) -> AgentState:
     """Insert the report row, capture the new id back into state."""
     try:
-        # agent_thoughts = full state minus the markdown (avoid duplicating)
+        # Serialize messages compactly — full LangChain messages are huge
+        msg_summary = []
+        for m in state.get("messages", []):
+            kind = type(m).__name__
+            if kind == "AIMessage":
+                tcs = getattr(m, "tool_calls", None) or []
+                if tcs:
+                    msg_summary.append({
+                        "kind": "AIMessage",
+                        "tool_calls": [{"name": tc["name"], "args": tc["args"]} for tc in tcs],
+                    })
+                else:
+                    text = m.content if isinstance(m.content, str) else str(m.content)
+                    msg_summary.append({"kind": "AIMessage", "text_chars": len(text)})
+            elif kind == "ToolMessage":
+                msg_summary.append({
+                    "kind": "ToolMessage",
+                    "tool_call_id": getattr(m, "tool_call_id", None),
+                    "content_chars": len(m.content) if isinstance(m.content, str) else 0,
+                })
+            else:
+                msg_summary.append({"kind": kind})
+
         thoughts = {
             "gold_context": state.get("gold_context", []),
-            "news_context": state.get("news_context", []),
+            "iterations": state.get("iterations", 0),
+            "messages_summary": msg_summary,
             "errors": state.get("errors", []),
         }
+
         report_id = pg.save_investigation(
             ticker=state["ticker"],
             anomaly_type=state["anomaly_type"],

@@ -37,7 +37,7 @@ class Settings(BaseSettings):
 
     # ── Postgres ─────────────────────────────────────────────────────────────
     postgres_host: str = "localhost"
-    postgres_port: int = 5432
+    postgres_port: int = 5433
     postgres_user: str = "pulsetrade"
     postgres_password: str = "pulsetrade_dev"
     postgres_db: str = "pulsetrade"
