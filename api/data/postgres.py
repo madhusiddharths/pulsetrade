@@ -53,6 +53,31 @@ CREATE INDEX IF NOT EXISTS idx_investigations_ticker
 
 CREATE INDEX IF NOT EXISTS idx_investigations_created_at
     ON investigations (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS anomaly_queue (
+    id               SERIAL PRIMARY KEY,
+    ticker           TEXT NOT NULL,
+    anomaly_type     TEXT NOT NULL,
+    window_start     TIMESTAMPTZ NOT NULL,
+    window_end       TIMESTAMPTZ NOT NULL,
+    z_score          DOUBLE PRECISION,
+    trigger_value    DOUBLE PRECISION,
+    baseline_mean    DOUBLE PRECISION,
+    baseline_stddev  DOUBLE PRECISION,
+    status           TEXT NOT NULL DEFAULT 'pending',
+    detected_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processed_at     TIMESTAMPTZ,
+    investigation_id INTEGER REFERENCES investigations(id) ON DELETE SET NULL,
+    CONSTRAINT anomaly_queue_status_chk
+        CHECK (status IN ('pending', 'processing', 'done', 'failed', 'skipped'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS anomaly_queue_dedup_idx
+    ON anomaly_queue (ticker, window_start, anomaly_type);
+
+CREATE INDEX IF NOT EXISTS anomaly_queue_status_idx
+    ON anomaly_queue (status, detected_at)
+    WHERE status = 'pending';
 """
 
 

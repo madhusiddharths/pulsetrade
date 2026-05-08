@@ -110,6 +110,35 @@ def get_news_for_window(
         cur.execute(query, (ticker, start, end))
         return _rows_to_dicts(cur)
 
+def get_all_gold_for_detection(lookback_minutes: int = 24 * 60) -> list[dict]:
+    """
+    Pull gold_5min_features for ALL tickers over the last N minutes.
+
+    Used by the anomaly detector (and future batch jobs) which need a baseline
+    per ticker and don't know the ticker list ahead of time. Pulls only the
+    columns needed for z-score detection — keeps result size manageable.
+
+    Returns ordered by (ticker, window_start) for easy per-ticker grouping.
+    """
+    cat = settings.databricks_catalog
+    sch = settings.databricks_schema
+
+    query = f"""
+    SELECT
+        ticker,
+        window_start,
+        window_end,
+        mean_price,
+        mean_change_pct,
+        mean_intraday_range,
+        n_observations
+    FROM {cat}.{sch}.gold_5min_features
+    WHERE window_end >= current_timestamp() - INTERVAL {int(lookback_minutes)} MINUTES
+    ORDER BY ticker, window_start
+    """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(query)
+        return _rows_to_dicts(cur)
 
 def healthcheck() -> dict:
     """
