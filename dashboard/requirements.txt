@@ -1,6 +1,25 @@
-streamlit==1.41.1
+# Core Streamlit
+streamlit==1.40.2
+
+# Charting
 plotly==5.24.1
-pandas==2.2.3
-databricks-sql-connector==3.7.0
-psycopg2-binary==2.9.10
+
+# Data sources
+databricks-sql-connector==3.4.0
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.36
+
+# Auto-refresh component
+streamlit-autorefresh==1.0.1
+
+# HTTP for the trigger panel (calls FastAPI /investigate)
+requests==2.32.3
+
+# Config / env
 python-dotenv==1.0.1
+pydantic==2.10.4
+pydantic-settings==2.6.1
+
+# DataFrames (Streamlit uses pandas everywhere)
+pandas==2.1.4
+numpy<2.0.0

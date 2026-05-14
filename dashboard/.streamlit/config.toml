@@ -1,0 +1,21 @@
+# PulseTrade dashboard config.
+# Bloomberg-style dark: black background, green=up, red=down,
+# yellow accents for emphasis.
+
+[theme]
+base = "dark"
+primaryColor = "#FFB300"          # amber accent (selected items, primary buttons)
+backgroundColor = "#0E0E0E"       # near-black main background
+secondaryBackgroundColor = "#1A1A1A"  # slight contrast for sidebar and cards
+textColor = "#E0E0E0"             # off-white text — easier on eyes than pure #FFFFFF
+font = "monospace"                # terminal vibe
+
+[server]
+# Local-only by default; we'll open it up when deploying to GKE in Day 10-13
+address = "127.0.0.1"
+port = 8501
+headless = true
+runOnSave = true                  # auto-reload on file edit during dev
+
+[browser]
+gatherUsageStats = false

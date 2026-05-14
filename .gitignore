@@ -61,3 +61,7 @@ airflow/logs/
 airflow/plugins/
 airflow/config/airflow.cfg
 airflow/.env
+
+# Dashboard
+dashboard/.venv/
+dashboard/.streamlit/secrets.toml
