@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     langsmith_api_key: str | None = Field(default=None, alias="LANGSMITH_API_KEY")
     langsmith_project: str = Field(default="pulsetrade", alias="LANGSMITH_PROJECT")
 
+    # ── MLflow ───────────────────────────────────────────────────────────────
+    mlflow_tracking_uri: str = Field(default="databricks", alias="MLFLOW_TRACKING_URI")
+    mlflow_experiment_name: str = Field(
+        default="/Users/madhusiddharths1@gmail.com/pulsetrade-anomaly-detector",
+        alias="MLFLOW_EXPERIMENT_NAME",
+    )
+
     # ── Tavily (used in Day 5) ───────────────────────────────────────────────
     tavily_api_key: str | None = Field(default=None, alias="TAVILY_API_KEY")
 

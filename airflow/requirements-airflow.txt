@@ -1,0 +1,14 @@
+# Block 3 deps (DAGs that talk to Postgres + Databricks + FastAPI)
+requests==2.32.3
+psycopg2-binary==2.9.9
+databricks-sql-connector==3.4.0
+pydantic==2.10.4
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+
+# Block 4 deps (ML training pipeline)
+mlflow==2.18.0
+scikit-learn==1.5.2
+numpy<2.0.0
+pandas<2.3.0
+databricks-sdk==0.40.0

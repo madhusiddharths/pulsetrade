@@ -46,10 +46,10 @@
 ---
 x-airflow-common:
   &airflow-common
-  # In order to add custom dependencies or upgrade provider packages you can use your extended image.
-  # Comment the image line, place your Dockerfile in the directory where you placed the docker-compose.yaml
-  # and uncomment the "build" line below, Then run `docker-compose build` to build the images.
-  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.10.4}
+  image: pulsetrade/airflow:2.10.4
+  build:
+    context: .
+    dockerfile: Dockerfile
   # build: .
   environment:
     &airflow-common-env
@@ -68,7 +68,6 @@ x-airflow-common:
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     # WARNING: Use _PIP_ADDITIONAL_REQUIREMENTS option ONLY for a quick checks
     # for other purpose (development, test and especially production usage) build/extend Airflow image.
-    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-requests==2.32.3 psycopg2-binary==2.9.9 databricks-sql-connector==3.4.0 pydantic==2.10.4 pydantic-settings==2.6.1 python-dotenv==1.0.1}
     PULSETRADE_API_URL: 'http://host.docker.internal:8000'
     PULSETRADE_PG_HOST: 'host.docker.internal'
     PULSETRADE_PG_PORT: '5433'
@@ -91,6 +90,10 @@ x-airflow-common:
     POSTGRES_USER: 'pulsetrade'
     POSTGRES_PASSWORD: 'pulsetrade_dev'
     POSTGRES_DB: 'pulsetrade'
+    # MLflow → Databricks-managed tracking server
+    MLFLOW_TRACKING_URI: 'databricks'
+    # DATABRICKS_HOST and DATABRICKS_TOKEN are already set above; mlflow + databricks-sdk
+    # use them automatically when MLFLOW_TRACKING_URI=databricks.
     # The following line can be used to set a custom config file...
     # The following line can be used to set a custom config file, stored in the local config folder
     # If you want to use it, outcomment it and replace airflow.cfg with the name of your config file
@@ -270,7 +273,6 @@ services:
       _AIRFLOW_WWW_USER_CREATE: 'true'
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
       _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
-      _PIP_ADDITIONAL_REQUIREMENTS: ''
     user: "0:0"
     volumes:
       - ${AIRFLOW_PROJ_DIR:-.}:/sources

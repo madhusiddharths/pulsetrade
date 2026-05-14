@@ -17,6 +17,7 @@ from databricks import sql
 from databricks.sql.client import Connection
 
 from config import settings
+from typing import Iterator, Optional
 
 
 def _hostname() -> str:
@@ -134,6 +135,48 @@ def get_all_gold_for_detection(lookback_minutes: int = 24 * 60) -> list[dict]:
         n_observations
     FROM {cat}.{sch}.gold_5min_features
     WHERE window_end >= current_timestamp() - INTERVAL {int(lookback_minutes)} MINUTES
+    ORDER BY ticker, window_start
+    """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(query)
+        return _rows_to_dicts(cur)
+
+def get_gold_window(
+    days_back: int = 30,
+    end_time: Optional[datetime] = None,
+) -> list[dict]:
+    """
+    Pull all gold_5min_features rows over a [days_back] window ending at end_time.
+
+    Used by the nightly Isolation Forest training job — needs a longer history
+    than the realtime detector. If end_time is None, defaults to NOW.
+
+    Returns ordered by (ticker, window_start) for predictable feature engineering.
+    """
+    cat = settings.databricks_catalog
+    sch = settings.databricks_schema
+
+    end_clause = (
+        f"AND window_start <= TIMESTAMP'{end_time.isoformat()}'"
+        if end_time is not None
+        else ""
+    )
+
+    query = f"""
+    SELECT
+        ticker,
+        window_start,
+        window_end,
+        mean_price,
+        price_stddev,
+        mean_change_pct,
+        mean_intraday_range,
+        mean_news_sentiment,
+        news_article_count,
+        n_observations
+    FROM {cat}.{sch}.gold_5min_features
+    WHERE window_start >= current_timestamp() - INTERVAL {int(days_back)} DAYS
+      {end_clause}
     ORDER BY ticker, window_start
     """
     with get_connection() as conn, conn.cursor() as cur:
