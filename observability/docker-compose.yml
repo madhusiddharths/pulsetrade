@@ -1,0 +1,50 @@
+# observability/docker-compose.yml
+#
+# Prometheus + Grafana stack for PulseTrade.
+# Runs separately from Airflow compose — different concern, different lifecycle.
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: pulsetrade-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      # Mount our config in read-only mode
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Persist time-series data across container restarts
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"  # 15 days of history is plenty for a demo
+    # CRITICAL on Linux: lets the container reach services on your host
+    # On Mac/Windows Docker Desktop, host.docker.internal works automatically.
+    # On Linux, you need this extra_hosts line.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: pulsetrade-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persist dashboards, data sources, users across restarts
+      - grafana-data:/var/lib/grafana
+      # Auto-provision the Prometheus data source (no manual setup in UI)
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      # Simple local creds; never use in prod
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      # Disable signup flows — single-user local instance
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:
+    

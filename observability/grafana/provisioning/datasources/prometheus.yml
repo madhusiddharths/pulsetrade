@@ -1,0 +1,11 @@
+# Auto-configures Prometheus as a data source on Grafana startup.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # Container-to-container hostname inside the compose network
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false  # locked down — config comes from this file, not the UI

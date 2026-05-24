@@ -13,6 +13,7 @@ only needs MCP tools when it wants more than this baseline.
 import asyncio
 from datetime import timezone
 from typing import Optional
+from observability.token_callback import GeminiTokenCounter
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -187,7 +188,10 @@ async def _investigate_async(state: AgentState) -> AgentState:
             print(f"[investigate] iteration {iteration}/{_max_iterations}", flush=True)
 
             try:
-                response: AIMessage = await llm.ainvoke(messages)
+                response: AIMessage = await llm.ainvoke(
+                    messages,
+                    config={"callbacks": [GeminiTokenCounter(node_name="investigate")]},
+                )
             except Exception as e:
                 state.setdefault("errors", []).append(f"investigate llm.ainvoke: {e}")
                 break
@@ -255,12 +259,14 @@ async def _investigate_async(state: AgentState) -> AgentState:
                 )
             ))
             try:
-                response = await llm.ainvoke(messages)
+                response = await llm.ainvoke(
+                    messages,
+                    config={"callbacks": [GeminiTokenCounter(node_name="investigate")]},
+                )
                 final_text = response.content if isinstance(response.content, str) else str(response.content)
             except Exception as e:
                 state.setdefault("errors", []).append(f"investigate forced-summary: {e}")
                 final_text = "# Investigation incomplete\n\nIteration cap reached without final answer."
-
         state["messages"] = messages
         state["iterations"] = iteration
         state["reasoning"] = final_text

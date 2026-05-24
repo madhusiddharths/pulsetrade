@@ -23,6 +23,7 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from config import settings
 from data import databricks as dbx
@@ -30,10 +31,20 @@ from data import postgres as pg
 from agent.graph import agent
 from agent.state import make_initial_state
 
+# Metrics live in their own module so agent nodes can import them
+# without creating a circular dependency with main.py.
+from metrics import (
+    investigations_total,
+    investigation_duration_seconds,
+    gemini_tokens_used_total,  # noqa: F401  (imported for visibility/re-export)
+)
 
 print(f"[debug] running with: {sys.executable}", flush=True)
 
-
+# ─────────────────────────────────────────────────────────────────────────────
+# Lifespan
+# ─────────────────────────────────────────────────────────────────────────────
+# ... (rest unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 # Lifespan
 # ─────────────────────────────────────────────────────────────────────────────
@@ -63,6 +74,12 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Instrument AFTER app is created with its final config.
+# .instrument(app) adds middleware that times every request and labels
+# by method/path/status_code.
+# .expose(app) adds the GET /metrics endpoint that Prometheus scrapes.
+Instrumentator().instrument(app).expose(app)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -180,50 +197,71 @@ async def investigate(req: InvestigationRequest):
         lookback_minutes=req.lookback_minutes,
     )
 
-    # The agent does blocking I/O (Databricks SQL, Gemini HTTP, Postgres).
-    # asyncio.to_thread runs it on a worker thread so the FastAPI event
-    # loop stays free to serve other requests during the 3-15s investigation.
+    # === Observability: track outcome for the counter increment in finally ===
+    # We default to "error" so any unhandled exit path counts as a failure.
+    # Only flipped to "success" once we know we have a persisted report.
+    status = "error"
+    
     try:
-        final = await asyncio.to_thread(agent.invoke, initial)
-    except Exception as e:
-        # The agent is supposed to capture errors into state, not raise.
-        # If we got here, something more fundamental broke (graph compile
-        # error, OOM, etc.) — return 500.
-        raise HTTPException(
-            status_code=500,
-            detail=f"agent invocation crashed: {e}",
+        # === Observability: time the agent invocation ===
+        # .time() is a context manager — it records the duration into the
+        # histogram automatically when the block exits, including on exception.
+        # We wrap only the agent.invoke call (not the whole function) because
+        # that's what we actually care to measure — the Pydantic parsing and
+        # response building are microseconds.
+        with investigation_duration_seconds.labels(ticker=req.ticker).time():
+            try:
+                final = await asyncio.to_thread(agent.invoke, initial)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"agent invocation crashed: {e}",
+                )
+
+        rid = final.get("report_id", 0)
+        if not rid:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "message": "agent completed without persisting a report",
+                    "errors": final.get("errors", []),
+                },
+            )
+
+        tool_calls = sum(
+            len(getattr(m, "tool_calls", None) or [])
+            for m in final.get("messages", [])
+            if type(m).__name__ == "AIMessage"
         )
 
-    rid = final.get("report_id", 0)
-    if not rid:
-        # Agent ran but didn't persist. Postgres write probably failed.
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": "agent completed without persisting a report",
-                "errors": final.get("errors", []),
-            },
+        # If we got here, the investigation succeeded end-to-end.
+        if final.get("errors"):
+            status = "partial"
+        else:
+            status = "success"
+        
+        return InvestigationResponse(
+            investigation_id=rid,
+            ticker=req.ticker,
+            anomaly_type=req.anomaly_type,
+            window_start=ws,
+            gold_rows=len(final.get("gold_context", [])),
+            iterations=final.get("iterations", 0),
+            tool_calls=tool_calls,
+            report_markdown=final.get("report_markdown", ""),
+            errors=final.get("errors", []),
         )
-
-    # Count tool calls from the LangChain message log
-    tool_calls = sum(
-        len(getattr(m, "tool_calls", None) or [])
-        for m in final.get("messages", [])
-        if type(m).__name__ == "AIMessage"
-    )
-
-    return InvestigationResponse(
-        investigation_id=rid,
-        ticker=req.ticker,
-        anomaly_type=req.anomaly_type,
-        window_start=ws,
-        gold_rows=len(final.get("gold_context", [])),
-        iterations=final.get("iterations", 0),
-        tool_calls=tool_calls,
-        report_markdown=final.get("report_markdown", ""),
-        errors=final.get("errors", []),
-    )
-
+    
+    finally:
+        # === Observability: always count the attempt ===
+        # finally runs even if HTTPException is raised above.
+        # This is what makes error rate math correct — errors must show up
+        # in the denominator AND the numerator.
+        investigations_total.labels(
+            ticker=req.ticker,
+            anomaly_type=req.anomaly_type,
+            status=status,
+        ).inc()
 
 @app.get(
     "/investigations/{investigation_id}",
