@@ -104,6 +104,10 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
     - ../api:/opt/pulsetrade-api:ro
+    # Docker-out-of-Docker: lets the worker spawn the pulsetrade-drift container
+    - /var/run/docker.sock:/var/run/docker.sock
+    # Where the drift container's HTML reports land on the host
+    - ../drift/reports:/opt/airflow/drift-reports
   user: "${AIRFLOW_UID:-50000}:0"
   extra_hosts:
     - "host.docker.internal:host-gateway"

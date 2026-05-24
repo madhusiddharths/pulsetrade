@@ -12,3 +12,5 @@ scikit-learn==1.5.2
 numpy<2.0.0
 pandas<2.3.0
 databricks-sdk==0.40.0
+
+apache-airflow-providers-docker

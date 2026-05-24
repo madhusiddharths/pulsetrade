@@ -1,0 +1,10 @@
+# drift/requirements-drift.txt
+# Pinned deps for the pulsetrade-drift image.
+# Evidently pinned to 0.7.x — the API and result-dict structure the code is
+# written against. A 0.8 bump could change both; pin protects us.
+evidently>=0.7,<0.8
+pandas>=2.0
+databricks-sql-connector>=3.0
+sqlalchemy>=2.0
+psycopg2-binary>=2.9
+python-dotenv>=1.0
