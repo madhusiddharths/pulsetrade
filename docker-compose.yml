@@ -1,0 +1,104 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PulseTrade — local compose stack (Day 11)
+#
+# PURPOSE: prove the containers cooperate with REAL service-to-service
+# networking before Kubernetes. The key change vs. Day 10's `docker run`:
+# host.docker.internal is GONE. Containers reach each other by SERVICE NAME on a
+# shared Docker network — api → postgres:5432, dashboard → api:8000. This is the
+# same mental model as K8s Services (Day 12), just different syntax.
+#
+# Run:    docker compose up --build
+# Stop:   docker compose down            (add -v to also wipe the pg volume)
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ── Postgres ────────────────────────────────────────────────────────────────
+  # Fresh & empty. The API's init_schema() lifespan hook creates the
+  # investigations + anomaly_queue tables on startup. Its data lives in a
+  # SEPARATE named volume (pgdata) — it does NOT touch your existing
+  # pulsetrade-postgres container or its data. Two Postgres on the same volume
+  # would corrupt each other; this one is isolated on purpose.
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      # These are what the postgres image itself reads to bootstrap the DB.
+      # Must match what the API sends as POSTGRES_USER/PASSWORD/DB below.
+      POSTGRES_USER: pulsetrade
+      POSTGRES_PASSWORD: pulsetrade
+      POSTGRES_DB: pulsetrade
+    ports:
+      # host:container — lets YOU connect from the Mac (psql, a GUI) on 5433.
+      # Containers do NOT use this; they use postgres:5432 internally.
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # api depends_on this being healthy, so the API doesn't start before PG
+      # can accept connections (avoids a startup-race crash).
+      test: ["CMD-SHELL", "pg_isready -U pulsetrade -d pulsetrade"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - pulsenet
+
+  # ── FastAPI agent (+ co-located MCP subprocess, Option A) ────────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    env_file:
+      # Your real secrets (Gemini, Databricks, Tavily) come from the host .env —
+      # NOT baked into the image. Same file you used with --env-file on Day 10.
+      - .env
+    environment:
+      # CRITICAL OVERRIDES — these REPLACE whatever .env says, so the container
+      # talks to the compose Postgres, not host.docker.internal:5433.
+      #   host  = the service name `postgres`
+      #   port  = 5432 (the INTERNAL container port, not the host's 5433)
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: pulsetrade
+      POSTGRES_USER: pulsetrade
+      POSTGRES_PASSWORD: pulsetrade
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pulsenet
+
+  # ── Streamlit dashboard ──────────────────────────────────────────────────────
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      # The dashboard reads Postgres DIRECTLY for display (Day 7 split) AND calls
+      # the API's /investigate from its Trigger panel. Both now go by service
+      # name on pulsenet:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: pulsetrade
+      POSTGRES_USER: pulsetrade
+      POSTGRES_PASSWORD: pulsetrade
+      # If your dashboard code reads an API base URL from env, this points it at
+      # the api service. ADJUST THE VAR NAME if your code calls it something else
+      # (e.g. FASTAPI_URL / INVESTIGATE_URL). Value is the important part.
+      PULSETRADE_API_URL: "http://api:8000"
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+    networks:
+      - pulsenet
+
+networks:
+  pulsenet:
+    driver: bridge
+
+volumes:
+  pgdata:
