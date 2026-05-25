@@ -1,0 +1,77 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Postgres — in-cluster pod (ADR-009: pod over Cloud SQL for the demo, cost $0).
+# Three objects: a PVC (disk), a Deployment (the pod), a Service (stable DNS name).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# PersistentVolumeClaim — requests a disk so DB data survives a pod restart.
+# (It still dies on cluster teardown — that's the ADR-009 demo tradeoff.)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.postgres.storage }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.images.postgres }}
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ .Values.postgres.password | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.db | quote }}
+            # postgres:16-alpine stores data in /var/lib/postgresql/data; point
+            # PGDATA at a subdir so the mounted volume's lost+found doesn't clash
+            # with initdb (a classic "initdb: directory not empty" gotcha).
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+          resources:
+            {{- toYaml .Values.resources.postgres | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "{{ .Values.postgres.user }}", "-d", "{{ .Values.postgres.db }}"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: pgdata
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+---
+# Service — gives the pod the stable in-cluster DNS name `postgres`.
+# ClusterIP (default) = reachable only inside the cluster, which is what we want
+# for a database. The api/dashboard reach it at postgres:5432.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

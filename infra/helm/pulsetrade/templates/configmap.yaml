@@ -1,0 +1,22 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ConfigMap — non-secret environment config injected into api + dashboard pods.
+# This is the K8s equivalent of the `environment:` overrides in docker-compose.
+# Secrets (API keys) do NOT go here — they live in the Secret. This is only the
+# safe-to-commit wiring: service-name DB host, ports, the dashboard's API URL.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pulsetrade-config
+data:
+  # Postgres reached by SERVICE NAME `postgres` on the cluster's internal DNS,
+  # internal port 5432 — exactly the compose pattern, now in K8s.
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: {{ .Values.postgres.db | quote }}
+  POSTGRES_USER: {{ .Values.postgres.user | quote }}
+  POSTGRES_PASSWORD: {{ .Values.postgres.password | quote }}
+
+  # Dashboard → API by service name `api` on port 8000 (the var name your
+  # dashboard code actually reads, confirmed on Day 11).
+  PULSETRADE_API_URL: "http://api:8000"

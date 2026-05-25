@@ -1,0 +1,6 @@
+apiVersion: v2
+name: pulsetrade
+description: PulseTrade — API (with co-located MCP) + Streamlit dashboard + Postgres on GKE
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

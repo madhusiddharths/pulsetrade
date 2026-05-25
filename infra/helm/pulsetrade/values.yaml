@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# values.yaml — every environment-specific knob lives here, so the templates
+# stay generic. Change an image tag or replica count here, not in the templates.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Your Artifact Registry image paths (pushed in phase 4, amd64).
+images:
+  api: us-central1-docker.pkg.dev/gen-lang-client-0874026413/pulsetrade/api:v1
+  dashboard: us-central1-docker.pkg.dev/gen-lang-client-0874026413/pulsetrade/dashboard:v1
+  postgres: postgres:16-alpine
+
+# Replica counts. api=1 on purpose (one MCP subprocess per pod — scale by
+# replicas, per ADR-008). For the demo, 1 each keeps it light on 2 e2-small nodes.
+replicas:
+  api: 1
+  dashboard: 1
+
+# Postgres config. These must agree across the postgres container, the API, and
+# the dashboard — same as the compose stack. NON-secret (demo DB), so they live
+# here, not in the Secret.
+postgres:
+  user: pulsetrade
+  password: pulsetrade
+  db: pulsetrade
+  storage: 1Gi          # PVC size — tiny, it's a demo DB
+
+# Name of the K8s Secret holding API keys (Gemini, Databricks, Tavily, etc.).
+# Created separately from .env with kubectl (see deploy steps) so secrets never
+# live in the chart. The deployments reference it by this name.
+secretName: pulsetrade-secrets
+
+# Resource requests/limits — deliberately small so 2 e2-small nodes can schedule
+# everything. Requests = guaranteed; limits = ceiling.
+resources:
+  api:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "512Mi" }
+  dashboard:
+    requests: { cpu: "50m",  memory: "128Mi" }
+    limits:   { cpu: "300m", memory: "384Mi" }
+  postgres:
+    requests: { cpu: "50m",  memory: "128Mi" }
+    limits:   { cpu: "250m", memory: "256Mi" }

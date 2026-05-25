@@ -1,0 +1,50 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dashboard (Streamlit). Deployment + Service.
+# Reads Postgres directly (Day 7 split) and calls the api Service for the Trigger
+# panel — both via service names from the ConfigMap. Also needs the Secret because
+# its direct Databricks reads use the same keys.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+spec:
+  replicas: {{ .Values.replicas.dashboard }}
+  selector:
+    matchLabels:
+      app: dashboard
+  template:
+    metadata:
+      labels:
+        app: dashboard
+    spec:
+      containers:
+        - name: dashboard
+          image: {{ .Values.images.dashboard }}
+          ports:
+            - containerPort: 8501
+          envFrom:
+            - configMapRef:
+                name: pulsetrade-config
+            - secretRef:
+                name: {{ .Values.secretName }}
+          resources:
+            {{- toYaml .Values.resources.dashboard | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              # Streamlit's built-in health endpoint.
+              path: /_stcore/health
+              port: 8501
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+spec:
+  selector:
+    app: dashboard
+  ports:
+    - port: 8501
+      targetPort: 8501
