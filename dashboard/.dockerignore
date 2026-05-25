@@ -1,0 +1,16 @@
+# Keep the dashboard build context lean.
+.venv/
+**/__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+
+# Secrets come from runtime env, never baked in.
+.env
+*.env
+
+# Local tooling / editor noise
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log

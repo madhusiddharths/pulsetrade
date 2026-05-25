@@ -26,6 +26,8 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
+import os  # add at top if not already there
+
 def _server_params() -> StdioServerParameters:
     """Build the stdio params for spawning our MCP server."""
     api_dir = Path(__file__).resolve().parents[1]  # agent/ → api/
@@ -33,6 +35,7 @@ def _server_params() -> StdioServerParameters:
         command=sys.executable,
         args=["-m", "mcp_server.server"],
         cwd=str(api_dir),
+        env=os.environ.copy(),   # ← pass parent env to the subprocess
     )
 
 

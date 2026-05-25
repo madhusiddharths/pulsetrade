@@ -1,0 +1,22 @@
+# Keep the build context small and the image clean.
+# WHY: anything copied in bloats the image and the build context upload.
+# .venv especially — it's the host's macOS venv, useless and large in a Linux image.
+
+.venv/
+**/__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+
+# Never bake secrets into an image. Env comes from K8s Secrets/ConfigMap at runtime.
+.env
+*.env
+
+# Tests don't need to ship in the runtime image.
+tests/
+
+# Local tooling / editor noise
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log
