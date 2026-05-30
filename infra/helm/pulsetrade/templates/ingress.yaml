@@ -1,0 +1,44 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Ingress — single public entry point (one load balancer) routing by path.
+#   /api(/|$)(.*)  -> api:8000        with the /api prefix REWRITTEN away
+#   /              -> dashboard:8501  (root — Streamlit stays happy)
+#
+# Method A (see Day 13 notes): dashboard at root avoids Streamlit's sub-path
+# pain; api namespaced under /api with the prefix stripped so FastAPI sees its
+# normal bare routes (/investigate, /health, /ready) — no app code changes.
+# ─────────────────────────────────────────────────────────────────────────────
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pulsetrade
+  annotations:
+    # rewrite-target with the capture group $2 strips the /api prefix:
+    # request /api/investigate  ->  capture group 2 = "investigate"  ->  /investigate
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    # Streamlit's websocket (/_stcore/stream) needs a longer read timeout than
+    # the nginx default, or the live dashboard connection drops.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - http:
+        paths:
+          # ORDER MATTERS: the more specific /api path must come before the
+          # catch-all "/", or "/" would swallow /api requests too.
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dashboard
+                port:
+                  number: 8501
+{{- end }}

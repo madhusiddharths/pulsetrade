@@ -24,6 +24,13 @@ postgres:
   db: pulsetrade
   storage: 1Gi          # PVC size — tiny, it's a demo DB
 
+# Ingress — one public load balancer routing by path (Method A):
+#   /api/*  -> api service   (prefix stripped, FastAPI sees bare routes)
+#   /       -> dashboard      (root, so Streamlit needs no baseUrlPath)
+ingress:
+  enabled: true
+  className: nginx        # the ingress-nginx controller installed in Block 3
+
 # Name of the K8s Secret holding API keys (Gemini, Databricks, Tavily, etc.).
 # Created separately from .env with kubectl (see deploy steps) so secrets never
 # live in the chart. The deployments reference it by this name.
