@@ -38,15 +38,18 @@ spec:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 15
-            periodSeconds: 20
+            initialDelaySeconds: 60      # give the app real time to settle before probing
+            periodSeconds: 30
+            timeoutSeconds: 15           # was default 1s — the cause of "context deadline exceeded"
+            failureThreshold: 10          # tolerate transient slowness before killing
           readinessProbe:
             httpGet:
               path: /ready
               port: 8000
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            failureThreshold: 6   # tolerate Databricks SQL warehouse cold-start
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 10           # /ready hits Databricks — needs a generous timeout
+            failureThreshold: 12         # tolerate the ~5min Databricks cold-start
 ---
 # Service — stable DNS name `api`, port 8000. ClusterIP: internal-only for now.
 # (Day 13 adds Ingress to expose it publicly; today we reach it via port-forward.)

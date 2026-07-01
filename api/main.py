@@ -158,9 +158,29 @@ async def health():
 
 @app.get("/ready", response_model=ReadinessResponse)
 async def ready():
-    dbx_check = dbx.healthcheck()
-    pg_check = pg.healthcheck()
-    all_ok = dbx_check.get("ok") and pg_check.get("ok")
+    # Readiness gates ONLY on Postgres — the dependency this service truly needs
+    # to serve requests and persist reports. Databricks is reported for
+    # visibility but does NOT gate readiness: its SQL-warehouse cold-start (or an
+    # overloaded warehouse) can block for minutes, and letting that hold the pod
+    # out of the Service would also cut off endpoints that don't need Databricks
+    # at all (/investigations/{id}, /metrics, docs). Per-request Databricks
+    # failures still surface from /investigate.
+    #
+    # Both checks are SYNCHRONOUS blocking calls, so run them off the event loop
+    # (keeps /health responsive — calling them inline previously froze the loop
+    # and got the pod killed). The Databricks check is additionally time-boxed so
+    # /ready always returns promptly even when the warehouse is unreachable; its
+    # connection also carries a socket timeout so the worker thread can't linger.
+    pg_check = await asyncio.to_thread(pg.healthcheck)
+
+    try:
+        dbx_check = await asyncio.wait_for(
+            asyncio.to_thread(dbx.healthcheck), timeout=10
+        )
+    except asyncio.TimeoutError:
+        dbx_check = {"ok": False, "error": "healthcheck timed out (>10s)"}
+
+    all_ok = bool(pg_check.get("ok"))
     return ReadinessResponse(
         status="ready" if all_ok else "degraded",
         timestamp=datetime.now(timezone.utc).isoformat(),

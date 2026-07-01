@@ -27,9 +27,14 @@ def _hostname() -> str:
 
 
 @contextmanager
-def get_connection() -> Iterator[Connection]:
+def get_connection(socket_timeout: Optional[int] = None) -> Iterator[Connection]:
     """
     Context manager for a Databricks SQL connection.
+
+    socket_timeout: if set, caps how long the underlying socket will block
+        (seconds) before raising. Used by healthcheck() so /ready fails fast
+        instead of hanging for the full SQL-warehouse cold-start. Leave None
+        for real queries, which may legitimately wait on warehouse warm-up.
 
     Usage:
         with get_connection() as conn:
@@ -37,11 +42,14 @@ def get_connection() -> Iterator[Connection]:
                 cur.execute("SELECT 1")
                 print(cur.fetchall())
     """
-    conn = sql.connect(
+    connect_kwargs = dict(
         server_hostname=_hostname(),
         http_path=settings.databricks_http_path,
         access_token=settings.databricks_token,
     )
+    if socket_timeout is not None:
+        connect_kwargs["_socket_timeout"] = socket_timeout
+    conn = sql.connect(**connect_kwargs)
     try:
         yield conn
     finally:
@@ -189,7 +197,7 @@ def healthcheck() -> dict:
     Returns {"ok": True} or {"ok": False, "error": "..."}.
     """
     try:
-        with get_connection() as conn, conn.cursor() as cur:
+        with get_connection(socket_timeout=8) as conn, conn.cursor() as cur:
             cur.execute("SELECT 1 AS ok")
             row = cur.fetchone()
         return {"ok": row[0] == 1}

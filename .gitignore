@@ -65,3 +65,4 @@ airflow/.env
 # Dashboard
 dashboard/.venv/
 dashboard/.streamlit/secrets.tomldrift/reports/
+drift/reports/

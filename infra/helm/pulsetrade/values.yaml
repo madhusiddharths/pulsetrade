@@ -5,7 +5,7 @@
 
 # Your Artifact Registry image paths (pushed in phase 4, amd64).
 images:
-  api: us-central1-docker.pkg.dev/gen-lang-client-0874026413/pulsetrade/api:v1
+  api: us-central1-docker.pkg.dev/gen-lang-client-0874026413/pulsetrade/api:v3
   dashboard: us-central1-docker.pkg.dev/gen-lang-client-0874026413/pulsetrade/dashboard:v1
   postgres: postgres:16-alpine
 
