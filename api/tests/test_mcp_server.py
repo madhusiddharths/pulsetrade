@@ -54,7 +54,7 @@ def main():
         lookback_minutes=args.lookback_minutes,
     )
 
-    print(f"\n=== INVOKING AGENT ===")
+    print("\n=== INVOKING AGENT ===")
     print(f"ticker={initial['ticker']} type={initial['anomaly_type']}")
     print(f"window_start={initial['window_start']}")
     print(f"lookback_minutes={initial['lookback_minutes']}\n")
@@ -94,13 +94,13 @@ def main():
     print(f"  ticker:       {row['ticker']}")
     print(f"  anomaly_type: {row['anomaly_type']}")
     print(f"  created_at:   {row['created_at']}")
-    print(f"\n--- report_markdown (first 800 chars) ---")
+    print("\n--- report_markdown (first 800 chars) ---")
     print(row["report_markdown"][:800])
 
     # Validation
     failed = False
     if final.get("errors"):
-        print(f"\n❌ agent recorded errors:")
+        print("\n❌ agent recorded errors:")
         for e in final["errors"]:
             print(f"   - {e}")
         failed = True

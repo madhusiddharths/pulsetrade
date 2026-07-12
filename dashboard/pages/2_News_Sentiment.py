@@ -41,7 +41,7 @@ with st.sidebar:
     )
 
     st.divider()
-    st.caption(f"Auto-refresh: every 30s")
+    st.caption("Auto-refresh: every 30s")
 
 
 # ── Main ────────────────────────────────────────────────────────────────────

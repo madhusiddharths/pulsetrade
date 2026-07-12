@@ -1,0 +1,9 @@
+# Lint config for CI (.github/workflows/ci.yml) and local runs.
+# Scope: api/ producers/ drift/ dashboard/ (databricks/ holds notebook-style
+# code with Databricks runtime globals — linted by the platform, not here).
+
+[lint]
+# E402 (module import not at top of file) is deliberate in this repo:
+# script-style entry points do `sys.path.insert(...)` before their imports so
+# they run both standalone and from Airflow/containers.
+ignore = ["E402"]

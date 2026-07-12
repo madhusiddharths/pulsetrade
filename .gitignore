@@ -66,3 +66,6 @@ airflow/.env
 dashboard/.venv/
 dashboard/.streamlit/secrets.tomldrift/reports/
 drift/reports/
+
+# graphify knowledge-graph output (local tool artifact)
+graphify-out/

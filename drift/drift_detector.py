@@ -17,7 +17,6 @@ CRITICAL: the output has NO pre-computed "drifted: true/false". For each
 column we compute drifted = (p_value < threshold) ourselves. For K-S p-value,
 LOWER means MORE drift (low p-value = distributions unlikely to be the same).
 """
-from typing import Any
 
 import pandas as pd
 from evidently import Report

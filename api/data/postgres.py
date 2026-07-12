@@ -11,10 +11,8 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Text, DateTime, MetaData, Table,
-    text,
+    create_engine, text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine
 
 from config import settings

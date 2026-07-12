@@ -1,0 +1,54 @@
+# Deploy — MANUAL ONLY (workflow_dispatch), deliberately badge-free.
+#
+# Honest caveat: this repo runs an EPHEMERAL GKE cluster (create → demo →
+# destroy, see docs/runbook-gke.md and ADR-009). This workflow therefore only
+# succeeds while that cluster exists; it is demonstrated live during the
+# day-13 session and documented with evidence, not left running. It assumes:
+#   - the `pulsetrade` cluster exists in us-central1-a
+#   - the in-cluster secret `pulsetrade-secrets` was created (runbook step —
+#     API keys never live in GitHub)
+#   - the GCP_SA_KEY secret holds a service-account key with
+#     roles/artifactregistry.writer + roles/container.developer
+#     (production path: Workload Identity Federation instead of a key)
+name: Deploy (manual, ephemeral cluster)
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_tag:
+        description: "api image tag to deploy (e.g. latest, v3, or a commit SHA)"
+        default: "latest"
+        required: true
+      dashboard_tag:
+        description: "dashboard image tag to deploy"
+        default: "latest"
+        required: true
+
+env:
+  PROJECT: gen-lang-client-0874026413
+  ZONE: us-central1-a
+  CLUSTER: pulsetrade
+  GAR: us-central1-docker.pkg.dev/gen-lang-client-0874026413/pulsetrade
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: gke-gcloud-auth-plugin
+      - uses: azure/setup-helm@v4
+      - name: Get cluster credentials
+        run: gcloud container clusters get-credentials "$CLUSTER" --zone "$ZONE" --project "$PROJECT"
+      - name: Helm upgrade
+        run: |
+          helm upgrade --install pulsetrade infra/helm/pulsetrade \
+            --set images.api="$GAR/api:${{ inputs.api_tag }}" \
+            --set images.dashboard="$GAR/dashboard:${{ inputs.dashboard_tag }}" \
+            --wait --timeout 5m
+      - name: Show rollout result
+        run: kubectl get pods -o wide && kubectl get ingress

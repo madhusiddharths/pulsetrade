@@ -65,8 +65,8 @@ Key patterns added:
 Both producers verified in Confluent UI — clicked into each topic's Messages
 tab and saw real JSON flowing.
 
-Screenshots saved to `docs/screenshots/01_stock_producer_kafka.png` and
-`02_news_producer_kafka.png`.
+Screenshots saved to [`docs/screenshots/kafka-stock-prices-topic.png`](../screenshots/kafka-stock-prices-topic.png)
+and [`docs/screenshots/kafka-market-news-topic.png`](../screenshots/kafka-market-news-topic.png).
 
 ### Block 3 — Databricks Spark Structured Streaming → Bronze (~90 min)
 

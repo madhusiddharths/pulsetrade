@@ -1,0 +1,79 @@
+# CI — lint, offline unit tests, helm checks, amd64 image builds.
+# This is the BADGED workflow (README points here). It must stay green with no
+# cloud dependencies: the GAR push steps self-skip unless the GCP_SA_KEY secret
+# is configured, so the badge cannot rot when the ephemeral infra (and its
+# service-account key) is torn down. Deploys live in deploy.yml (manual).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  GAR: us-central1-docker.pkg.dev/gen-lang-client-0874026413/pulsetrade
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install CI deps (offline set — heavy integrations are stubbed in tests)
+        run: pip install -r requirements-ci.txt
+      - name: Lint
+        run: ruff check api producers drift dashboard
+      - name: Offline unit tests (no credentials, no network)
+        run: pytest api/tests/unit drift/tests -q
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint chart
+        run: helm lint infra/helm/pulsetrade
+      - name: Render chart — regression guard (both Ingress resources must render)
+        # NOTE: this proves the YAML renders, not that the ingress rewrite works —
+        # that is only verifiable on a live cluster (see docs/runbook-gke.md).
+        run: |
+          helm template pulsetrade infra/helm/pulsetrade > /tmp/rendered.yaml
+          grep -q "name: pulsetrade-api" /tmp/rendered.yaml
+          grep -q "name: pulsetrade-dashboard" /tmp/rendered.yaml
+
+  build:
+    needs: [lint-test, helm]
+    runs-on: ubuntu-latest
+    env:
+      # Secrets are not readable in `if:` directly; surface presence via env.
+      HAS_GCP_KEY: ${{ secrets.GCP_SA_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Login to Artifact Registry
+        if: github.ref == 'refs/heads/main' && env.HAS_GCP_KEY == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: us-central1-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.GCP_SA_KEY }}
+      - name: Build api image (amd64 — GKE nodes; Macs build arm64, see day-12 journal)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./api
+          platforms: linux/amd64
+          push: ${{ github.ref == 'refs/heads/main' && env.HAS_GCP_KEY == 'true' }}
+          tags: |
+            us-central1-docker.pkg.dev/gen-lang-client-0874026413/pulsetrade/api:${{ github.sha }}
+            us-central1-docker.pkg.dev/gen-lang-client-0874026413/pulsetrade/api:latest
+      - name: Build dashboard image (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./dashboard
+          platforms: linux/amd64
+          push: ${{ github.ref == 'refs/heads/main' && env.HAS_GCP_KEY == 'true' }}
+          tags: |
+            us-central1-docker.pkg.dev/gen-lang-client-0874026413/pulsetrade/dashboard:${{ github.sha }}
+            us-central1-docker.pkg.dev/gen-lang-client-0874026413/pulsetrade/dashboard:latest

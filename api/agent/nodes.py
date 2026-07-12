@@ -11,8 +11,6 @@ only needs MCP tools when it wants more than this baseline.
 """
 
 import asyncio
-from datetime import timezone
-from typing import Optional
 from observability.token_callback import GeminiTokenCounter
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -26,28 +24,7 @@ from .state import AgentState
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
 
-# Singletons — built once per process.
-_llm_with_tools = None
 _max_iterations = 8
-
-
-async def _get_llm():
-    """Build (or return cached) Gemini client bound to MCP tools."""
-    global _llm_with_tools
-    if _llm_with_tools is None:
-        tools = await get_mcp_tools()
-        base_llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            temperature=0.2,
-            google_api_key=settings.google_api_key,
-        )
-        _llm_with_tools = base_llm.bind_tools(tools)
-        print(
-            f"[llm] bound {len(tools)} MCP tools to Gemini: "
-            f"{[t.name for t in tools]}",
-            flush=True,
-        )
-    return _llm_with_tools
 
 
 def _build_system_prompt(state: AgentState) -> str:
@@ -155,7 +132,6 @@ async def _investigate_async(state: AgentState) -> AgentState:
     subprocess and invalidates the tool handles — must NOT call tools
     after the `async with` block exits.
     """
-    from .mcp_client import mcp_session
 
     async with mcp_session() as (_session, tools):
         tools_by_name = {t.name: t for t in tools}
@@ -250,7 +226,7 @@ async def _investigate_async(state: AgentState) -> AgentState:
                 messages.append(ToolMessage(content=result_text, tool_call_id=tool_call_id))
 
         if iteration >= _max_iterations and not final_text:
-            print(f"[investigate] hit iteration cap, requesting final summary", flush=True)
+            print("[investigate] hit iteration cap, requesting final summary", flush=True)
             messages.append(HumanMessage(
                 content=(
                     "You've used your tool-call budget. Stop calling tools and "

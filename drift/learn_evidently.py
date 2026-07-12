@@ -10,7 +10,6 @@ what the tool gives you BEFORE wiring it to real gold data in Block 2.
 Run:  python learn_evidently.py
 Then: open drift_report.html in your browser
 """
-import pandas as pd
 from sklearn import datasets
 
 # New API (Evidently 0.7.x):

@@ -17,7 +17,7 @@ from databricks import sql
 from databricks.sql.client import Connection
 
 from config import settings
-from typing import Iterator, Optional
+from typing import Optional
 
 
 def _hostname() -> str:

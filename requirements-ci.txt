@@ -1,0 +1,10 @@
+# Deps for the OFFLINE unit tests + lint that run in CI (.github/workflows/ci.yml).
+# Deliberately tiny: heavy integrations (mlflow, sklearn, evidently, databricks)
+# are stubbed in the tests' conftest.py — see api/tests/unit/ and drift/tests/.
+pytest==8.3.4
+ruff==0.8.6
+pandas==2.2.3
+numpy==2.1.3
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-dotenv==1.0.1

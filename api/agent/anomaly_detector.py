@@ -18,10 +18,9 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 
 # Allow running as a script from anywhere

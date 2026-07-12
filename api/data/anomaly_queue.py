@@ -6,7 +6,6 @@ Airflow DAGs (which set up their own connection — see airflow/dags/lib/).
 The shared piece is the SQL; the connection differs by context.
 """
 
-from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import text

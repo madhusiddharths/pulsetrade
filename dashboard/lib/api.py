@@ -8,7 +8,6 @@ import os
 from typing import Optional
 
 import requests
-import streamlit as st
 
 
 API_URL = os.environ.get("PULSETRADE_API_URL", "http://localhost:8000")
