@@ -35,13 +35,15 @@ jobs:
       - uses: azure/setup-helm@v4
       - name: Lint chart
         run: helm lint infra/helm/pulsetrade
-      - name: Render chart — regression guard (both Ingress resources must render)
-        # NOTE: this proves the YAML renders, not that the ingress rewrite works —
+      - name: Render chart — regression guard (ingress must route both backends)
+        # NOTE: this proves the YAML renders and the routing intent survives —
+        # /api → api service, / → dashboard. It does NOT prove the rewrite works;
         # that is only verifiable on a live cluster (see docs/runbook-gke.md).
         run: |
           helm template pulsetrade infra/helm/pulsetrade > /tmp/rendered.yaml
-          grep -q "name: pulsetrade-api" /tmp/rendered.yaml
-          grep -q "name: pulsetrade-dashboard" /tmp/rendered.yaml
+          grep -qF "kind: Ingress" /tmp/rendered.yaml
+          grep -qF 'path: /api(/|$)(.*)' /tmp/rendered.yaml
+          awk '/kind: Ingress/,0' /tmp/rendered.yaml | grep -q "name: dashboard"
 
   build:
     needs: [lint-test, helm]
