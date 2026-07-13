@@ -223,7 +223,14 @@ async def _investigate_async(state: AgentState) -> AgentState:
                 if len(result_text) > 8000:
                     result_text = result_text[:8000] + "\n... [truncated]"
 
-                messages.append(ToolMessage(content=result_text, tool_call_id=tool_call_id))
+                # name= is REQUIRED for Gemini: langchain serializes it into
+                # function_response.name, and Gemini 400s on an empty name
+                # (surfaced by parallel tool calls during the day-13 session).
+                messages.append(
+                    ToolMessage(
+                        content=result_text, tool_call_id=tool_call_id, name=tool_name
+                    )
+                )
 
         if iteration >= _max_iterations and not final_text:
             print("[investigate] hit iteration cap, requesting final summary", flush=True)

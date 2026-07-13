@@ -11,6 +11,14 @@ metadata:
   name: api
 spec:
   replicas: {{ .Values.replicas.api }}
+  # Recreate, not RollingUpdate: the 2×e2-small demo nodes can't host old+new
+  # api pods side by side (256Mi request each), so a rolling upgrade deadlocks
+  # with the new pod Pending. Brief downtime per upgrade is fine for this demo.
+  strategy:
+    type: Recreate
+    # explicit null: server-side apply otherwise keeps the old rollingUpdate
+    # params on the live object, which are forbidden with Recreate
+    rollingUpdate: null
   selector:
     matchLabels:
       app: api
@@ -31,9 +39,10 @@ spec:
                 name: {{ .Values.secretName }}
           resources:
             {{- toYaml .Values.resources.api | nindent 12 }}
-          # Liveness/readiness use the endpoints from Day 4. /ready checks
-          # Databricks + Postgres reachability, so the pod won't take traffic
-          # until its backends are reachable.
+          # Liveness/readiness use the endpoints from Day 4. /ready gates on
+          # Postgres ONLY (Databricks is reported but not gating, time-boxed at
+          # 3s — see api/main.py) so a warehouse outage can't hold the pod out
+          # of the Service.
           livenessProbe:
             httpGet:
               path: /health

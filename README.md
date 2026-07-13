@@ -13,8 +13,12 @@ Gemini, and renders a verdict with evidence:
 
 ![Agent brief — a completed investigation](docs/screenshots/dashboard-agent-brief.png)
 
-> 🎬 A GIF of a live investigation running on GKE (public ingress URL) lands here
-> after the day-13 session — see [docs/daily/day13.md](docs/daily/day13.md).
+And here it is running **live on GKE**, served through the public ingress IP —
+including an investigation the agent completed during a total Databricks outage
+by falling back to live web search (the whole story, bugs included, is in
+[docs/daily/day13.md](docs/daily/day13.md)):
+
+![PulseTrade live on GKE](docs/screenshots/gke-dashboard-live.gif)
 
 ## Architecture
 
@@ -53,7 +57,7 @@ stack run locally by design ([ADR-006](docs/adr/ADR-006-observability-stack.md))
 | [8](docs/daily/day8.md)–[9](docs/daily/day9.md) | Prometheus, Grafana, Evidently drift | ✅ local (by design) | [load run](docs/screenshots/api-investigate-smoke-loop.png) |
 | [10](docs/daily/day10.md)–[11](docs/daily/day11.md) | Containerize + compose stack | ✅ local | [first k8s trial](docs/screenshots/k8s-pods-services-first-deploy.png) |
 | [12](docs/daily/day12.md) | Deploy to GKE with Helm (ephemeral) | ✅ GKE, torn down (~$0.15) | journal |
-| [13](docs/daily/day13.md) | Ingress + CI/CD + evidence + teardown | 🚧 this session | [runbook](docs/runbook-gke.md) |
+| [13](docs/daily/day13.md) | Ingress + CI/CD + evidence + teardown | ✅ GKE, torn down (~$0.25) | [live GIF](docs/screenshots/gke-dashboard-live.gif) · [investigations](docs/screenshots/gke-dashboard-investigations.png) · [runbook](docs/runbook-gke.md) |
 | 14–21 | Polish, demo, write-up | ✅ folded into day 13 | this README |
 
 ## Quickstart (one command, three containers)

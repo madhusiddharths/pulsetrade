@@ -20,3 +20,17 @@ data:
   # Dashboard → API by service name `api` on port 8000 (the var name your
   # dashboard code actually reads, confirmed on Day 11).
   PULSETRADE_API_URL: "http://api:8000"
+
+  # Dashboard → Postgres directly (dashboard/lib reads PULSETRADE_PG_*, not
+  # POSTGRES_*). Day 12 accidentally provided these via the unfiltered Secret;
+  # day 13's stricter secret filter exposed the gap — the wiring lives HERE.
+  PULSETRADE_PG_HOST: "postgres"
+  PULSETRADE_PG_PORT: "5432"
+  PULSETRADE_PG_DB: {{ .Values.postgres.db | quote }}
+  PULSETRADE_PG_USER: {{ .Values.postgres.user | quote }}
+  PULSETRADE_PG_PASSWORD: {{ .Values.postgres.password | quote }}
+
+  # dashboard/lib/data.py reads a single POSTGRES_URL DSN (day-12's journal
+  # called this var "unused" — it is used, by the dashboard's direct reads;
+  # the Investigations page was silently on localhost-fallback until day 13).
+  POSTGRES_URL: "postgresql+psycopg2://{{ .Values.postgres.user }}:{{ .Values.postgres.password }}@postgres:5432/{{ .Values.postgres.db }}"
