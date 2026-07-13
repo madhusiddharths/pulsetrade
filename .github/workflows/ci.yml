@@ -9,6 +9,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 env:
   GAR: us-central1-docker.pkg.dev/gen-lang-client-0874026413/pulsetrade

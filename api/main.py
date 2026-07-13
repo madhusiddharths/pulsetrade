@@ -173,12 +173,14 @@ async def ready():
     # connection also carries a socket timeout so the worker thread can't linger.
     pg_check = await asyncio.to_thread(pg.healthcheck)
 
+    # 3s, not 10: the kubelet's probe timeout is 10s — a 10s box here made
+    # /ready answer at ~10.0s and flap the probe whenever the warehouse hung.
     try:
         dbx_check = await asyncio.wait_for(
-            asyncio.to_thread(dbx.healthcheck), timeout=10
+            asyncio.to_thread(dbx.healthcheck), timeout=3
         )
     except asyncio.TimeoutError:
-        dbx_check = {"ok": False, "error": "healthcheck timed out (>10s)"}
+        dbx_check = {"ok": False, "error": "healthcheck timed out (>3s)"}
 
     all_ok = bool(pg_check.get("ok"))
     return ReadinessResponse(
