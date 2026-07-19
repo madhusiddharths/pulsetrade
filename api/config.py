@@ -56,8 +56,10 @@ class Settings(BaseSettings):
 
     # ── MLflow ───────────────────────────────────────────────────────────────
     mlflow_tracking_uri: str = Field(default="databricks", alias="MLFLOW_TRACKING_URI")
+    # Databricks workspace experiment paths are user-scoped; set the real path
+    # via MLFLOW_EXPERIMENT_NAME in .env (e.g. /Users/<workspace-user>/pulsetrade-anomaly-detector).
     mlflow_experiment_name: str = Field(
-        default="/Users/madhusiddharths1@gmail.com/pulsetrade-anomaly-detector",
+        default="/Shared/pulsetrade-anomaly-detector",
         alias="MLFLOW_EXPERIMENT_NAME",
     )
 

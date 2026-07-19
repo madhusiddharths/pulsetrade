@@ -24,7 +24,7 @@ after capturing evidence; total cost ~$0.15.
   infra. Teardown is non-negotiable (`gcloud container clusters delete`).
 
 ## Phase sequence (what was actually done)
-1. **Prereqs** — gcloud 553, kubectl 1.34, authed as madhusiddharths1@gmail.com.
+1. **Prereqs** — gcloud 553, kubectl 1.34, authed with the project owner account.
    Installed `gke-gcloud-auth-plugin` (needed PATH fix: SDK bin at
    `/opt/homebrew/share/google-cloud-sdk/bin` wasn't on PATH; added to .zshrc).
    Confirmed billing enabled on project gen-lang-client-0874026413
